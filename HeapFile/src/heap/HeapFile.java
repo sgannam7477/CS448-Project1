@@ -201,7 +201,11 @@ public class HeapFile implements GlobalConst {
     HFPage apage = new HFPage();
 
     Minibase.BufferManager.pinPage(rid.pageno, apage, false);
-    apage.updateRecord(rid, newRecord);
+    try {
+      apage.updateRecord(rid, newRecord);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidUpdateException();
+    }
     Minibase.BufferManager.unpinPage(rid.pageno, true);
 
     return true;
@@ -214,6 +218,7 @@ public class HeapFile implements GlobalConst {
    */
   public boolean deleteRecord(RID rid) {
     HFPage apage = new HFPage();
+
     Minibase.BufferManager.pinPage(rid.pageno, apage, false);
     apage.deleteRecord(rid);
     Minibase.BufferManager.unpinPage(rid.pageno, true);
