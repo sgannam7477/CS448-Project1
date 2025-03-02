@@ -20,6 +20,7 @@ public class HeapFile implements GlobalConst {
   private PageId tail;
 
   private TreeMap<Short, HashSet<PageId>> freepages;
+  private HashSet<PageId> pages;
 
   /**
    * If the given name already denotes a file, this opens it; otherwise, this
@@ -29,6 +30,7 @@ public class HeapFile implements GlobalConst {
   public HeapFile(String name) {
     this.name = name;
     freepages = new TreeMap<Short, HashSet<PageId>>();
+    pages = new HashSet<PageId>();
 
     head = Minibase.DiskManager.get_file_entry(name);
     HFPage apage = new HFPage();
@@ -42,6 +44,7 @@ public class HeapFile implements GlobalConst {
         tail = tmp;
         Minibase.BufferManager.pinPage(tail, apage, false);
       }
+      addFreePage(tail);
       Minibase.BufferManager.unpinPage(tail, false);
     } else {
       head = Minibase.BufferManager.newPage(apage, 1);
@@ -58,6 +61,8 @@ public class HeapFile implements GlobalConst {
   }
 
   protected void addFreePage(PageId p) {
+    pages.add(p);
+
     HFPage apage = new HFPage();
     Minibase.BufferManager.pinPage(p, apage, false);
     if (apage.getFreeSpace() == 0) {
@@ -168,28 +173,17 @@ public class HeapFile implements GlobalConst {
    * @throws IllegalArgumentException if the rid is invalid
    */
   public Tuple getRecord(RID rid) {
-    PageId p = head;
     HFPage apage = new HFPage();
 
-    Minibase.BufferManager.pinPage(p, apage, false);
-    while (apage.getNextPage().pid >= 0) {
-      if (apage.getCurPage().equals(rid.pageno)) {
-        byte[] record = apage.selectRecord(rid);
-        return new Tuple(record, 0, record.length);
-      }
-
-      PageId tmp = apage.getNextPage();
-      Minibase.BufferManager.unpinPage(p, false);
-      p = tmp;
-      Minibase.BufferManager.pinPage(p, apage, false);
+    if (!pages.contains(rid.pageno)) {
+      throw new IllegalArgumentException("Invalid RID");
     }
-    if (apage.getCurPage().equals(rid.pageno)) {
-      byte[] record = apage.selectRecord(rid);
-      return new Tuple(record, 0, record.length);
-    }
-    Minibase.BufferManager.unpinPage(p, false);
 
-    throw new IllegalArgumentException("RID pageno not in HeapFile");
+    Minibase.BufferManager.pinPage(rid.pageno, apage, false);
+    byte[] record = apage.selectRecord(rid);
+    Minibase.BufferManager.unpinPage(rid.pageno, false);
+
+    return new Tuple(record, 0, record.length);
   }
 
   /**
@@ -200,12 +194,18 @@ public class HeapFile implements GlobalConst {
   public boolean updateRecord(RID rid, Tuple newRecord) throws InvalidUpdateException {
     HFPage apage = new HFPage();
 
+    if (!pages.contains(rid.pageno)) {
+      throw new IllegalArgumentException("Invalid RID");
+    }
+
     Minibase.BufferManager.pinPage(rid.pageno, apage, false);
+    removeFreePage(rid.pageno);
     try {
       apage.updateRecord(rid, newRecord);
     } catch (IllegalArgumentException e) {
       throw new InvalidUpdateException();
     }
+    addFreePage(rid.pageno);
     Minibase.BufferManager.unpinPage(rid.pageno, true);
 
     return true;
@@ -219,8 +219,14 @@ public class HeapFile implements GlobalConst {
   public boolean deleteRecord(RID rid) {
     HFPage apage = new HFPage();
 
+    if (!pages.contains(rid.pageno)) {
+      throw new IllegalArgumentException("Invalid RID");
+    }
+
     Minibase.BufferManager.pinPage(rid.pageno, apage, false);
+    removeFreePage(rid.pageno);
     apage.deleteRecord(rid);
+    addFreePage(rid.pageno);
     Minibase.BufferManager.unpinPage(rid.pageno, true);
 
     return true;
@@ -263,6 +269,9 @@ public class HeapFile implements GlobalConst {
     return name;
   }
 
+  /**
+   * Returns the first page of the heap file.
+   */
   public PageId getHead() {
     return head;
   }
